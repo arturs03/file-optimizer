@@ -2,25 +2,24 @@
 
 import { useCallback, useState } from "react"
 import { useDropzone } from "react-dropzone"
-import { Upload, X } from "lucide-react"
+import { Upload, X, Download } from "lucide-react"
 import { Button } from "./ui/button"
 import { Progress } from "./ui/progress"
-
-interface FileWithPreview extends File {
-  preview?: string
-}
+import { uploadFile, getTaskStatus, CompressionTask } from "@/lib/api"
+import { toast } from "sonner"
 
 export function FileUpload() {
-  const [files, setFiles] = useState<FileWithPreview[]>([])
+  const [files, setFiles] = useState<Array<{
+    file: File;
+    task?: CompressionTask;
+  }>>([])
   const [uploading, setUploading] = useState(false)
-  const [progress, setProgress] = useState(0)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    setFiles(acceptedFiles.map(file => 
-      Object.assign(file, {
-        preview: URL.createObjectURL(file)
-      })
-    ))
+    setFiles(prev => [
+      ...prev,
+      ...acceptedFiles.map(file => ({ file, task: undefined }))
+    ])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -31,29 +30,63 @@ export function FileUpload() {
     }
   })
 
-  const removeFile = (fileToRemove: FileWithPreview) => {
-    setFiles(files.filter(file => file !== fileToRemove))
-    if (fileToRemove.preview) {
-      URL.revokeObjectURL(fileToRemove.preview)
-    }
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleUpload = async () => {
     setUploading(true)
-    // TODO: Implement actual upload logic
-    setProgress(0)
     
-    // Simulate progress
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setUploading(false)
-          return 100
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const response = await uploadFile(files[i].file)
+        
+        // Start polling for task status
+        const pollTaskStatus = async () => {
+          const task = await getTaskStatus(response.taskId)
+          setFiles(prev => prev.map((f, index) => 
+            index === i ? { ...f, task } : f
+          ))
+          
+          if (task.progress.status === 'processing') {
+            setTimeout(pollTaskStatus, 1000)
+          } else if (task.progress.status === 'completed') {
+            toast.success(`File ${files[i].file.name} compressed successfully`)
+          } else if (task.progress.status === 'error') {
+            toast.error(`Failed to compress ${files[i].file.name}: ${task.error}`)
+          }
         }
-        return prev + 10
-      })
-    }, 500)
+        
+        pollTaskStatus()
+      } catch (error) {
+        toast.error(`Failed to upload ${files[i].file.name}`)
+      }
+    }
+    
+    setUploading(false)
+  }
+
+  const getProgress = (task?: CompressionTask) => {
+    if (!task) return 0
+    return task.progress.progress
+  }
+
+  const getStatus = (task?: CompressionTask) => {
+    if (!task) return 'pending'
+    return task.progress.status
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'text-green-500'
+      case 'error':
+        return 'text-red-500'
+      case 'processing':
+        return 'text-blue-500'
+      default:
+        return 'text-gray-500'
+    }
   }
 
   return (
@@ -72,26 +105,43 @@ export function FileUpload() {
 
       {files.length > 0 && (
         <div className="space-y-2">
-          {files.map((file) => (
+          {files.map((file, index) => (
             <div
-              key={file.name}
+              key={index}
               className="flex items-center justify-between p-2 border rounded"
             >
               <div className="flex items-center space-x-2">
-                <div className="text-sm">{file.name}</div>
+                <div className="text-sm">{file.file.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                  ({(file.file.size / 1024 / 1024).toFixed(2)} MB)
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => removeFile(file)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center space-x-2">
+                <span className={`text-sm ${getStatusColor(getStatus(file.task))}`}>
+                  {getStatus(file.task)}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeFile(index)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           ))}
+
+          <div className="space-y-2">
+            {files.map((file, index) => (
+              file.task && (
+                <Progress 
+                  key={index} 
+                  value={getProgress(file.task)} 
+                  className="w-full"
+                />
+              )
+            ))}
+          </div>
 
           <Button
             onClick={handleUpload}
@@ -101,9 +151,19 @@ export function FileUpload() {
             {uploading ? "Uploading..." : "Upload Files"}
           </Button>
 
-          {uploading && (
-            <Progress value={progress} className="w-full" />
-          )}
+          {files.map((file, index) => (
+            file.task?.progress.status === 'completed' && (
+              <Button
+                key={index}
+                variant="outline"
+                className="w-full"
+                onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}/uploads/${file.task?.result?.outputPath.split('/').pop()}`, '_blank')}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Compressed File
+              </Button>
+            )
+          ))}
         </div>
       )}
     </div>

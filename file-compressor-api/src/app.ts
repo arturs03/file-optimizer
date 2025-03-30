@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import multer from 'multer';
 import { WorkerPoolService } from './services/worker-pool.service';
+import { CleanupService } from './services/cleanup.service';
 import { FileInfo } from './types';
 
 dotenv.config();
@@ -52,6 +53,10 @@ app.post('/upload', upload.single('file'), async (req: Request, res: Response) =
 
     const result = await workerPool.compress(fileInfo);
     
+    // Schedule cleanup for both original and compressed files
+    CleanupService.scheduleCleanup(req.file.path);
+    CleanupService.scheduleCleanup(result.outputPath);
+    
     res.json({ 
       message: 'File compressed successfully',
       originalFilename: req.file.originalname,
@@ -59,12 +64,35 @@ app.post('/upload', upload.single('file'), async (req: Request, res: Response) =
       originalSize: result.originalSize,
       compressedSize: result.compressedSize,
       compressionRatio: result.compressionRatio,
-      format: result.format
+      format: result.format,
+      taskId: result.taskId
     });
   } catch (error) {
     console.error('Compression error:', error);
     res.status(500).json({ error: 'Failed to compress file' });
   }
+});
+
+// Get task status endpoint
+app.get('/tasks/:taskId', (req: Request, res: Response) => {
+  const task = workerPool.getTaskStatus(req.params.taskId);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+  res.json(task);
+});
+
+// Get all tasks endpoint
+app.get('/tasks', (req: Request, res: Response) => {
+  const tasks = workerPool.getAllTasks();
+  res.json(tasks);
+});
+
+// Cleanup all files endpoint
+app.post('/cleanup', (req: Request, res: Response) => {
+  CleanupService.cleanupAll();
+  res.json({ message: 'Cleanup completed' });
 });
 
 app.listen(PORT, () => {
