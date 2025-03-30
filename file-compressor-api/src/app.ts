@@ -1,13 +1,16 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import multer from 'multer';
+import { WorkerPoolService } from './services/worker-pool.service';
+import { FileInfo } from './types';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const workerPool = new WorkerPoolService(4); // Use 4 workers by default
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -28,19 +31,40 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-// File upload endpoint
-app.post('/upload', upload.single('file'), (req, res) => {
+// File upload and compression endpoint
+app.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+    res.status(400).json({ error: 'No file uploaded' });
+    return;
   }
-  res.json({ 
-    message: 'File uploaded successfully',
-    filename: req.file.filename
-  });
+
+  try {
+    const fileInfo: FileInfo = {
+      path: req.file.path,
+      size: req.file.size,
+      mimeType: req.file.mimetype,
+      filename: req.file.filename
+    };
+
+    const result = await workerPool.compress(fileInfo);
+    
+    res.json({ 
+      message: 'File compressed successfully',
+      originalFilename: req.file.originalname,
+      compressedFilename: path.basename(result.outputPath),
+      originalSize: result.originalSize,
+      compressedSize: result.compressedSize,
+      compressionRatio: result.compressionRatio,
+      format: result.format
+    });
+  } catch (error) {
+    console.error('Compression error:', error);
+    res.status(500).json({ error: 'Failed to compress file' });
+  }
 });
 
 app.listen(PORT, () => {
