@@ -5,7 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "start": "node dist/app.js",
-    "dev": "nodemon src/app.ts",
+    "dev": "tsc && concurrently \"tsc -w\" \"nodemon dist/app.js\"",
     "build": "tsc",
     "test": "jest"
   },
@@ -19,6 +19,7 @@
     "@types/jest": "^29.5.12",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.24",
+    "concurrently": "^8.2.2",
     "jest": "^29.7.0",
     "nodemon": "^3.1.0",
     "ts-jest": "^29.1.2",

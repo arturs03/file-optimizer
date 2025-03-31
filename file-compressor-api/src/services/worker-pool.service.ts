@@ -19,9 +19,10 @@ export class WorkerPoolService {
 
   private initializeWorkers() {
     for (let i = 0; i < this.maxWorkers; i++) {
-      const worker = new Worker(
-        path.join(__dirname, '../workers/compression.worker.ts')
-      );
+      const workerPath = path.join(__dirname, '../../dist/workers/compression.worker.js');
+      console.log('Initializing worker with path:', workerPath);
+      
+      const worker = new Worker(workerPath);
 
       worker.on('message', (result) => {
         const currentTask = this.queue[0];
@@ -59,6 +60,7 @@ export class WorkerPoolService {
       });
 
       worker.on('error', (error) => {
+        console.error('Worker error:', error);
         const currentTask = this.queue[0];
         if (!currentTask) {
           console.error('No task found in queue when processing worker error');
@@ -90,7 +92,15 @@ export class WorkerPoolService {
   }
 
   private getAvailableWorker(): { worker: Worker; busy: boolean } | undefined {
-    return this.workers.find(w => !w.busy);
+    const worker = this.workers.find(w => !w.busy);
+    if (!worker) {
+      console.error('No available workers in pool:', {
+        totalWorkers: this.workers.length,
+        busyWorkers: this.workers.filter(w => w.busy).length,
+        queueLength: this.queue.length
+      });
+    }
+    return worker;
   }
 
   private processNextTask() {
@@ -112,11 +122,20 @@ export class WorkerPoolService {
       this.activeWorkers++;
       availableWorker.busy = true;
       task.progress = { progress: 0, status: 'processing' };
-      availableWorker.worker.postMessage({
-        fileInfo: task.fileInfo,
-        options: task.options,
-        taskId: task.id
-      });
+      
+      try {
+        availableWorker.worker.postMessage({
+          fileInfo: task.fileInfo,
+          options: task.options,
+          taskId: task.id
+        });
+      } catch (error) {
+        console.error('Error posting message to worker:', error);
+        this.activeWorkers--;
+        availableWorker.busy = false;
+        currentTask.reject(new Error('Failed to start compression task'));
+        this.queue.shift();
+      }
     }
   }
 
