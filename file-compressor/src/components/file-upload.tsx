@@ -2,168 +2,141 @@
 
 import { useCallback, useState } from "react"
 import { useDropzone } from "react-dropzone"
-import { Upload, X, Download } from "lucide-react"
-import { Button } from "./ui/button"
-import { Progress } from "./ui/progress"
-import { uploadFile, getTaskStatus, CompressionTask } from "@/lib/api"
+import { Download } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { uploadFile, getTaskStatus, CompressionTask, getFileUrl } from "@/lib/api"
 import { toast } from "sonner"
 
+interface FileWithTask {
+  file: File;
+  task?: CompressionTask;
+}
+
 export function FileUpload() {
-  const [files, setFiles] = useState<Array<{
-    file: File;
-    task?: CompressionTask;
-  }>>([])
-  const [uploading, setUploading] = useState(false)
+  const [files, setFiles] = useState<FileWithTask[]>([])
+  const [isUploading, setIsUploading] = useState(false)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prev => [
       ...prev,
-      ...acceptedFiles.map(file => ({ file, task: undefined }))
+      ...acceptedFiles.map(file => ({ file }))
     ])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp'],
-      'video/*': ['.mp4', '.mov', '.avi', '.webm']
+      'image/*': ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
+      'video/*': ['.mp4', '.webm', '.mov']
     }
   })
 
-  const removeFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index))
-  }
-
   const handleUpload = async () => {
-    setUploading(true)
-    
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const response = await uploadFile(files[i].file)
-        
-        // Start polling for task status
-        const pollTaskStatus = async () => {
-          const task = await getTaskStatus(response.taskId)
-          setFiles(prev => prev.map((f, index) => 
-            index === i ? { ...f, task } : f
-          ))
-          
-          if (task.progress.status === 'processing') {
-            setTimeout(pollTaskStatus, 1000)
-          } else if (task.progress.status === 'completed') {
-            toast.success(`File ${files[i].file.name} compressed successfully`)
-          } else if (task.progress.status === 'error') {
-            toast.error(`Failed to compress ${files[i].file.name}: ${task.error}`)
+    setIsUploading(true)
+    try {
+      for (const fileWithTask of files) {
+        if (!fileWithTask.task) {
+          try {
+            const result = await uploadFile(fileWithTask.file)
+            const task = await getTaskStatus(result.taskId)
+            setFiles(prev => prev.map(f => 
+              f.file === fileWithTask.file ? { ...f, task } : f
+            ))
+            toast.success(`Successfully compressed ${fileWithTask.file.name}`)
+          } catch {
+            toast.error(`Failed to compress ${fileWithTask.file.name}`)
           }
         }
-        
-        pollTaskStatus()
-      } catch {
-        toast.error(`Failed to upload ${files[i].file.name}`)
       }
+    } finally {
+      setIsUploading(false)
     }
-    
-    setUploading(false)
+  }
+
+  const removeFile = (fileToRemove: File) => {
+    setFiles(prev => prev.filter(f => f.file !== fileToRemove))
   }
 
   const getProgress = (task?: CompressionTask) => {
     if (!task) return 0
-    return task.progress.progress
+    if (task.progress.status === 'completed') return 100
+    if (task.progress.status === 'error') return 0
+    return task.progress.progress || 0
   }
 
-  const getStatus = (task?: CompressionTask) => {
-    if (!task) return 'pending'
-    return task.progress.status
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
+  const getStatusColor = (task?: CompressionTask) => {
+    if (!task) return 'bg-gray-200'
+    switch (task.progress.status) {
       case 'completed':
-        return 'text-green-500'
+        return 'bg-green-500'
       case 'error':
-        return 'text-red-500'
+        return 'bg-red-500'
       case 'processing':
-        return 'text-blue-500'
+        return 'bg-blue-500'
       default:
-        return 'text-gray-500'
+        return 'bg-gray-200'
     }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-2xl mx-auto p-4">
       <div
         {...getRootProps()}
-        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-          ${isDragActive ? "border-primary bg-primary/10" : "border-border"}`}
+        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+          isDragActive ? 'border-primary bg-primary/10' : 'border-gray-300'
+        }`}
       >
         <input {...getInputProps()} />
-        <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-        <p className="mt-2 text-sm text-muted-foreground">
-          Drag & drop files here, or click to select files
-        </p>
+        {isDragActive ? (
+          <p>Drop the files here ...</p>
+        ) : (
+          <p>Drag & drop files here, or click to select files</p>
+        )}
       </div>
 
       {files.length > 0 && (
-        <div className="space-y-2">
-          {files.map((file, index) => (
-            <div
-              key={index}
-              className="flex items-center justify-between p-2 border rounded"
-            >
-              <div className="flex items-center space-x-2">
-                <div className="text-sm">{file.file.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  ({(file.file.size / 1024 / 1024).toFixed(2)} MB)
+        <div className="mt-4 space-y-4">
+          {files.map(({ file, task }) => (
+            <div key={file.name} className="flex items-center gap-4 p-4 bg-background rounded-lg shadow">
+              <div className="flex-1">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium">{file.name}</span>
+                  <div className="flex items-center gap-2">
+                    {task?.result && (
+                      <a
+                        href={getFileUrl(task.result.outputPath)}
+                        download
+                        className="p-2 hover:bg-accent rounded-full"
+                      >
+                        <Download className="h-4 w-4" />
+                      </a>
+                    )}
+                    <button
+                      onClick={() => removeFile(file)}
+                      className="text-sm text-destructive"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className={`text-sm ${getStatusColor(getStatus(file.task))}`}>
-                  {getStatus(file.task)}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeFile(index)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+                <Progress value={getProgress(task)} className={getStatusColor(task)} />
+                {task?.result && (
+                  <div className="text-sm text-muted-foreground mt-2">
+                    Compressed from {(task.result.originalSize / 1024 / 1024).toFixed(2)}MB to{' '}
+                    {(task.result.compressedSize / 1024 / 1024).toFixed(2)}MB ({task.result.compressionRatio.toFixed(2)}% reduction)
+                  </div>
+                )}
               </div>
             </div>
           ))}
-
-          <div className="space-y-2">
-            {files.map((file, index) => (
-              file.task && (
-                <Progress 
-                  key={index} 
-                  value={getProgress(file.task)} 
-                  className="w-full"
-                />
-              )
-            ))}
-          </div>
-
           <Button
             onClick={handleUpload}
-            disabled={uploading}
+            disabled={isUploading || files.every(f => f.task)}
             className="w-full"
           >
-            {uploading ? "Uploading..." : "Upload Files"}
+            {isUploading ? 'Uploading...' : 'Upload and Compress'}
           </Button>
-
-          {files.map((file, index) => (
-            file.task?.progress.status === 'completed' && (
-              <Button
-                key={index}
-                variant="outline"
-                className="w-full"
-                onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}/uploads/${file.task?.result?.outputPath.split('/').pop()}`, '_blank')}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Download Compressed File
-              </Button>
-            )
-          ))}
         </div>
       )}
     </div>

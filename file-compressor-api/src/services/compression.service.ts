@@ -28,6 +28,12 @@ export class CompressionService {
     }
   }
 
+  private static getPublicUrl(filePath: string): string {
+    // Convert the full file path to a URL path starting with /uploads
+    const fileName = path.basename(filePath);
+    return `/uploads/${fileName}`;
+  }
+
   static async compressImage(
     fileInfo: FileInfo,
     options: CompressionOptions = {},
@@ -60,7 +66,7 @@ export class CompressionService {
         originalSize: fileInfo.size,
         compressedSize,
         compressionRatio,
-        outputPath,
+        outputPath: this.getPublicUrl(outputPath),
         format,
         taskId
       };
@@ -120,7 +126,7 @@ export class CompressionService {
               originalSize: fileInfo.size,
               compressedSize,
               compressionRatio,
-              outputPath,
+              outputPath: this.getPublicUrl(outputPath),
               format,
               taskId
             });

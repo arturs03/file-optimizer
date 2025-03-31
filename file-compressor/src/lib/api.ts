@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -15,6 +15,7 @@ export interface UploadResponse {
   compressionRatio: number;
   format: string;
   taskId: string;
+  outputPath: string;
 }
 
 export interface CompressionTask {
@@ -40,9 +41,18 @@ export interface CompressionTask {
     compressionRatio: number;
     outputPath: string;
     format: string;
+    taskId: string;
   };
   error?: string;
 }
+
+export const getFileUrl = (path: string) => {
+  if (!path) return '';
+  // If the path is already a full URL, return it as is
+  if (path.startsWith('http')) return path;
+  // Otherwise, prepend the API URL
+  return `${API_URL}${path}`;
+};
 
 export const uploadFile = async (file: File): Promise<UploadResponse> => {
   const formData = new FormData();
