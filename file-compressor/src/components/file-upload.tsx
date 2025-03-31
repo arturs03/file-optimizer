@@ -79,6 +79,14 @@ export function FileUpload() {
     }
   }
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+  }
+
   return (
     <div className="w-full max-w-2xl mx-auto p-4">
       <div
@@ -106,7 +114,18 @@ export function FileUpload() {
                     {task?.result && (
                       <a
                         href={getFileUrl(task.result.outputPath)}
-                        download
+                        download={`compressed-${file.name}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const link = document.createElement('a');
+                          link.href = getFileUrl(task.result!.outputPath);
+                          link.download = `compressed-${file.name}`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
                         className="p-2 hover:bg-accent rounded-full"
                       >
                         <Download className="h-4 w-4" />
@@ -123,8 +142,8 @@ export function FileUpload() {
                 <Progress value={getProgress(task)} className={getStatusColor(task)} />
                 {task?.result && (
                   <div className="text-sm text-muted-foreground mt-2">
-                    Compressed from {(task.result.originalSize / 1024 / 1024).toFixed(2)}MB to{' '}
-                    {(task.result.compressedSize / 1024 / 1024).toFixed(2)}MB ({task.result.compressionRatio.toFixed(2)}% reduction)
+                    Compressed from {formatFileSize(task.result.originalSize)} to{' '}
+                    {formatFileSize(task.result.compressedSize)} ({(100 - task.result.compressionRatio).toFixed(2)}% reduction)
                   </div>
                 )}
               </div>

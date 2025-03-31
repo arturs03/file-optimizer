@@ -34,6 +34,10 @@ export class CompressionService {
     return `/uploads/${fileName}`;
   }
 
+  private static calculateCompressionRatio(originalSize: number, compressedSize: number): number {
+    return ((originalSize - compressedSize) / originalSize) * 100;
+  }
+
   static async compressImage(
     fileInfo: FileInfo,
     options: CompressionOptions = {},
@@ -53,7 +57,7 @@ export class CompressionService {
         .toFile(outputPath);
 
       const compressedSize = fs.statSync(outputPath).size;
-      const compressionRatio = (compressedSize / fileInfo.size) * 100;
+      const compressionRatio = this.calculateCompressionRatio(fileInfo.size, compressedSize);
 
       console.log('Image compression completed:', {
         filename: fileInfo.filename,
@@ -113,7 +117,7 @@ export class CompressionService {
         .on('end', () => {
           try {
             const compressedSize = fs.statSync(outputPath).size;
-            const compressionRatio = (compressedSize / fileInfo.size) * 100;
+            const compressionRatio = this.calculateCompressionRatio(fileInfo.size, compressedSize);
 
             console.log('Video compression completed:', {
               filename: fileInfo.filename,
@@ -134,7 +138,7 @@ export class CompressionService {
             reject(error);
           }
         })
-        .on('error', (err) => {
+        .on('error', () => {
           console.error('Video compression failed:', {
             filename: fileInfo.filename,
             error: err.message
