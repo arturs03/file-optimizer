@@ -4,7 +4,7 @@ import { FileInfo, CompressionOptions, CompressionResult, CompressionTask, Compr
 import { v4 as uuidv4 } from 'uuid';
 
 export class WorkerPoolService {
-  private workers: Worker[] = [];
+  private workers: Array<{ worker: Worker; busy: boolean }> = [];
   private queue: Array<{
     task: CompressionTask;
     resolve: (result: CompressionResult) => void;
@@ -27,20 +27,25 @@ export class WorkerPoolService {
         this.activeWorkers--;
         this.processNextTask();
 
+        const currentTask = this.queue[0];
+        if (!currentTask) {
+          console.error('No task found in queue when processing worker message');
+          return;
+        }
+
+        const task = currentTask.task;
         if (result.success) {
-          const task = this.queue[0].task;
           task.progress = { progress: 100, status: 'completed' };
           task.result = { ...result.result, taskId: task.id };
-          this.queue[0].resolve({ ...result.result, taskId: task.id });
+          currentTask.resolve({ ...result.result, taskId: task.id });
         } else {
-          const task = this.queue[0].task;
           task.progress = { 
             progress: 0, 
             status: 'error',
             message: result.error 
           };
           task.error = result.error;
-          this.queue[0].reject(new Error(result.error));
+          currentTask.reject(new Error(result.error));
         }
 
         this.queue.shift();
@@ -49,29 +54,52 @@ export class WorkerPoolService {
       worker.on('error', (error) => {
         this.activeWorkers--;
         this.processNextTask();
-        const task = this.queue[0].task;
+
+        const currentTask = this.queue[0];
+        if (!currentTask) {
+          console.error('No task found in queue when processing worker error');
+          return;
+        }
+
+        const task = currentTask.task;
         task.progress = { 
           progress: 0, 
           status: 'error',
           message: error.message 
         };
         task.error = error.message;
-        this.queue[0].reject(error);
+        currentTask.reject(error);
         this.queue.shift();
       });
 
-      this.workers.push(worker);
+      this.workers.push({ worker, busy: false });
     }
+  }
+
+  private getAvailableWorker(): { worker: Worker; busy: boolean } | undefined {
+    return this.workers.find(w => !w.busy);
   }
 
   private processNextTask() {
     if (this.queue.length > 0 && this.activeWorkers < this.maxWorkers) {
-      const task = this.queue[0].task;
-      const worker = this.workers[this.activeWorkers];
+      const currentTask = this.queue[0];
+      if (!currentTask) {
+        console.error('No task found in queue when processing next task');
+        return;
+      }
+
+      const task = currentTask.task;
+      const availableWorker = this.getAvailableWorker();
       
+      if (!availableWorker) {
+        console.error('No available workers found');
+        return;
+      }
+
       this.activeWorkers++;
+      availableWorker.busy = true;
       task.progress = { progress: 0, status: 'processing' };
-      worker.postMessage({
+      availableWorker.worker.postMessage({
         fileInfo: task.fileInfo,
         options: task.options
       });

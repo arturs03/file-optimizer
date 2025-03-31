@@ -58,7 +58,7 @@ export function FileUpload() {
         }
         
         pollTaskStatus()
-      } catch (error) {
+      } catch {
         toast.error(`Failed to upload ${files[i].file.name}`)
       }
     }
