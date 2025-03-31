@@ -24,9 +24,6 @@ export class WorkerPoolService {
       );
 
       worker.on('message', (result) => {
-        this.activeWorkers--;
-        this.processNextTask();
-
         const currentTask = this.queue[0];
         if (!currentTask) {
           console.error('No task found in queue when processing worker message');
@@ -36,8 +33,9 @@ export class WorkerPoolService {
         const task = currentTask.task;
         if (result.success) {
           task.progress = { progress: 100, status: 'completed' };
-          task.result = { ...result.result, taskId: task.id };
-          currentTask.resolve({ ...result.result, taskId: task.id });
+          const resultWithTaskId = { ...result.result, taskId: task.id };
+          task.result = resultWithTaskId;
+          currentTask.resolve(resultWithTaskId);
         } else {
           task.progress = { 
             progress: 0, 
@@ -49,12 +47,18 @@ export class WorkerPoolService {
         }
 
         this.queue.shift();
+        this.activeWorkers--;
+        
+        // Mark the worker as available
+        const workerIndex = this.workers.findIndex(w => w.worker === worker);
+        if (workerIndex !== -1) {
+          this.workers[workerIndex].busy = false;
+        }
+
+        this.processNextTask();
       });
 
       worker.on('error', (error) => {
-        this.activeWorkers--;
-        this.processNextTask();
-
         const currentTask = this.queue[0];
         if (!currentTask) {
           console.error('No task found in queue when processing worker error');
@@ -70,6 +74,15 @@ export class WorkerPoolService {
         task.error = error.message;
         currentTask.reject(error);
         this.queue.shift();
+        this.activeWorkers--;
+
+        // Mark the worker as available
+        const workerIndex = this.workers.findIndex(w => w.worker === worker);
+        if (workerIndex !== -1) {
+          this.workers[workerIndex].busy = false;
+        }
+
+        this.processNextTask();
       });
 
       this.workers.push({ worker, busy: false });
@@ -101,7 +114,8 @@ export class WorkerPoolService {
       task.progress = { progress: 0, status: 'processing' };
       availableWorker.worker.postMessage({
         fileInfo: task.fileInfo,
-        options: task.options
+        options: task.options,
+        taskId: task.id
       });
     }
   }

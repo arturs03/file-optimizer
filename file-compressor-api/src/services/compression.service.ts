@@ -14,36 +14,72 @@ ffmpeg.setFfmpegPath(ffmpegStatic);
 export class CompressionService {
   private static readonly DEFAULT_QUALITY = 80;
 
+  private static validateFileInfo(fileInfo: FileInfo) {
+    if (!fileInfo.path || !fs.existsSync(fileInfo.path)) {
+      throw new Error(`File not found at path: ${fileInfo.path}`);
+    }
+
+    if (!fileInfo.mimeType) {
+      throw new Error('File mime type is required');
+    }
+
+    if (!fileInfo.size || fileInfo.size <= 0) {
+      throw new Error('Invalid file size');
+    }
+  }
+
   static async compressImage(
     fileInfo: FileInfo,
-    options: CompressionOptions = {}
+    options: CompressionOptions = {},
+    taskId: string
   ): Promise<CompressionResult> {
+    this.validateFileInfo(fileInfo);
+
     const { quality = this.DEFAULT_QUALITY, format = 'webp' } = options;
     const outputPath = path.join(
       path.dirname(fileInfo.path),
       `${path.parse(fileInfo.filename).name}.${format}`
     );
 
-    await sharp(fileInfo.path)
-      .webp({ quality })
-      .toFile(outputPath);
+    try {
+      await sharp(fileInfo.path)
+        .webp({ quality })
+        .toFile(outputPath);
 
-    const compressedSize = fs.statSync(outputPath).size;
-    const compressionRatio = (compressedSize / fileInfo.size) * 100;
+      const compressedSize = fs.statSync(outputPath).size;
+      const compressionRatio = (compressedSize / fileInfo.size) * 100;
 
-    return {
-      originalSize: fileInfo.size,
-      compressedSize,
-      compressionRatio,
-      outputPath,
-      format
-    };
+      console.log('Image compression completed:', {
+        filename: fileInfo.filename,
+        originalSize: fileInfo.size,
+        compressedSize,
+        compressionRatio
+      });
+
+      return {
+        originalSize: fileInfo.size,
+        compressedSize,
+        compressionRatio,
+        outputPath,
+        format,
+        taskId
+      };
+    } catch (error) {
+      console.error('Image compression failed:', {
+        filename: fileInfo.filename,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    }
   }
 
   static async compressVideo(
     fileInfo: FileInfo,
-    options: CompressionOptions = {}
+    options: CompressionOptions = {},
+    taskId: string
   ): Promise<CompressionResult> {
+    this.validateFileInfo(fileInfo);
+
     const { format = 'webm' } = options;
     const outputPath = path.join(
       path.dirname(fileInfo.path),
@@ -62,19 +98,41 @@ export class CompressionService {
           '-deadline good', // Encoding speed preset
           '-cpu-used 4' // CPU usage (0-5, higher is faster but lower quality)
         ])
-        .on('end', () => {
-          const compressedSize = fs.statSync(outputPath).size;
-          const compressionRatio = (compressedSize / fileInfo.size) * 100;
-
-          resolve({
-            originalSize: fileInfo.size,
-            compressedSize,
-            compressionRatio,
-            outputPath,
-            format
+        .on('progress', (progress) => {
+          console.log('Video compression progress:', {
+            filename: fileInfo.filename,
+            ...progress
           });
         })
+        .on('end', () => {
+          try {
+            const compressedSize = fs.statSync(outputPath).size;
+            const compressionRatio = (compressedSize / fileInfo.size) * 100;
+
+            console.log('Video compression completed:', {
+              filename: fileInfo.filename,
+              originalSize: fileInfo.size,
+              compressedSize,
+              compressionRatio
+            });
+
+            resolve({
+              originalSize: fileInfo.size,
+              compressedSize,
+              compressionRatio,
+              outputPath,
+              format,
+              taskId
+            });
+          } catch (error) {
+            reject(error);
+          }
+        })
         .on('error', (err) => {
+          console.error('Video compression failed:', {
+            filename: fileInfo.filename,
+            error: err.message
+          });
           reject(new Error(`Video compression failed: ${err.message}`));
         })
         .save(outputPath);
@@ -83,17 +141,27 @@ export class CompressionService {
 
   static async compress(
     fileInfo: FileInfo,
-    options: CompressionOptions = {}
+    options: CompressionOptions = {},
+    taskId: string
   ): Promise<CompressionResult> {
+    this.validateFileInfo(fileInfo);
+
     const isImage = fileInfo.mimeType.startsWith('image/');
     const isVideo = fileInfo.mimeType.startsWith('video/');
 
+    console.log('Starting compression:', {
+      filename: fileInfo.filename,
+      mimeType: fileInfo.mimeType,
+      size: fileInfo.size,
+      type: isImage ? 'image' : isVideo ? 'video' : 'unknown'
+    });
+
     if (isImage) {
-      return this.compressImage(fileInfo, options);
+      return this.compressImage(fileInfo, options, taskId);
     } else if (isVideo) {
-      return this.compressVideo(fileInfo, options);
+      return this.compressVideo(fileInfo, options, taskId);
     }
 
-    throw new Error('Unsupported file type');
+    throw new Error(`Unsupported file type: ${fileInfo.mimeType}`);
   }
 } 
