@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { useDropzone } from "react-dropzone"
-import { Download } from "lucide-react"
+import { Download, FileIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { uploadFile, getTaskStatus, CompressionTask, getFileUrl } from "@/lib/api"
@@ -11,6 +11,7 @@ import { toast } from "sonner"
 interface FileWithTask {
   file: File;
   task?: CompressionTask;
+  previewUrl?: string;
 }
 
 export function FileUpload() {
@@ -20,9 +21,21 @@ export function FileUpload() {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prev => [
       ...prev,
-      ...acceptedFiles.map(file => ({ file }))
+      ...acceptedFiles.map(file => ({
+        file,
+        previewUrl: URL.createObjectURL(file)
+      }))
     ])
-  }, [])
+
+    // Cleanup preview URLs when component unmounts
+    return () => {
+      files.forEach(file => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl)
+        }
+      })
+    }
+  }, [files])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -87,6 +100,43 @@ export function FileUpload() {
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
   }
 
+  const downloadFile = (outputPath: string, originalName: string) => {
+    fetch(getFileUrl(outputPath))
+      .then(response => response.blob())
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `compressed-${originalName}`;
+        document.body.appendChild(link);
+        link.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(link);
+      })
+      .catch(() => {
+        toast.error(`Failed to download ${originalName}`);
+      });
+  };
+
+  const handleDownloadAll = () => {
+    const completedTasks = files.filter(f => f.task?.result);
+    if (completedTasks.length === 0) {
+      toast.error('No compressed files available to download');
+      return;
+    }
+
+    // Add a small delay between downloads to prevent browser blocking
+    completedTasks.forEach((fileWithTask, index) => {
+      if (fileWithTask.task?.result) {
+        setTimeout(() => {
+          downloadFile(fileWithTask.task!.result!.outputPath, fileWithTask.file.name);
+        }, index * 1000); // Increased delay to 1 second between downloads
+      }
+    });
+
+    toast.success(`Starting download of ${completedTasks.length} files`);
+  };
+
   return (
     <div className="w-full max-w-2xl mx-auto p-4">
       <div
@@ -105,31 +155,51 @@ export function FileUpload() {
 
       {files.length > 0 && (
         <div className="mt-4 space-y-4">
-          {files.map(({ file, task }) => (
-            <div key={file.name} className="flex items-center gap-4 p-4 bg-background rounded-lg shadow">
+          <div className="flex justify-between items-center">
+            <h3 className="text-sm font-medium">Files ({files.length})</h3>
+            {files.some(f => f.task?.result) && (
+              <Button
+                onClick={handleDownloadAll}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Download All
+              </Button>
+            )}
+          </div>
+          {files.map(({ file, task, previewUrl }) => (
+            <div key={file.name} className="flex gap-4 p-4 bg-background rounded-lg shadow">
+              <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden bg-muted">
+                {file.type.startsWith('image/') ? (
+                  <img
+                    src={task?.result ? getFileUrl(task.result.outputPath) : previewUrl}
+                    alt={file.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : file.type.startsWith('video/') ? (
+                  <video
+                    src={task?.result ? getFileUrl(task.result.outputPath) : previewUrl}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-muted">
+                    <FileIcon className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                )}
+              </div>
               <div className="flex-1">
                 <div className="flex justify-between items-center mb-2">
                   <span className="font-medium">{file.name}</span>
                   <div className="flex items-center gap-2">
                     {task?.result && (
-                      <a
-                        href={getFileUrl(task.result.outputPath)}
-                        download={`compressed-${file.name}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const link = document.createElement('a');
-                          link.href = getFileUrl(task.result!.outputPath);
-                          link.download = `compressed-${file.name}`;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
+                      <button
+                        onClick={() => downloadFile(task.result!.outputPath, file.name)}
                         className="p-2 hover:bg-accent rounded-full"
                       >
                         <Download className="h-4 w-4" />
-                      </a>
+                      </button>
                     )}
                     <button
                       onClick={() => removeFile(file)}
